@@ -1,0 +1,191 @@
+-- ===============================================
+-- 1 Crear la base de datos 
+-- ===============================================
+
+create database SafeDropSQL
+use SafeDropSQL
+
+-- ===============================================
+-- 2 Creacion de las primeras tablas
+-- ===============================================
+
+-- Tabla de recidentes
+CREATE TABLE Residentes 
+(
+    id_residente INT IDENTITY(1,1) NOT NULL,
+    nombre VARCHAR(50) NOT NULL,
+    apellido VARCHAR(50) NOT NULL,
+    torre_bloque VARCHAR(20) NOT NULL,
+    numero_departamento VARCHAR(20) NOT NULL,
+    telefono VARCHAR(15) NOT NULL,
+    estatus BIT DEFAULT 1 NOT NULL, -- 1 = Activo, 0 = Inactivo (Mudanza)
+    CONSTRAINT PK_Residentes PRIMARY KEY (id_residente)
+);
+
+-- Tabla de empresas de paqueteria
+CREATE TABLE Empresas_Paquetaria 
+(
+    id_empresa INT IDENTITY(1,1) NOT NULL,
+    nombre_empresa VARCHAR(50) NOT NULL,
+    CONSTRAINT PK_Empresas_Paquetaria PRIMARY KEY (id_empresa)
+);
+
+-- ===============================================
+-- 3 Tabla del control operativo y control
+-- ===============================================
+
+-- Tabla central: Recepcion de paquetes
+CREATE TABLE Recepcion_Paquetes 
+(
+    id_paquete INT IDENTITY(1,1) NOT NULL,
+    id_residente INT NOT NULL,
+    id_empresa INT NOT NULL,
+    fecha_recepcion DATETIME DEFAULT GETDATE() NOT NULL, -- Sello temporal automático del servidor
+    descripcion_paquete VARCHAR(250) NULL,
+    estatus_entrega VARCHAR(20) DEFAULT 'En Caseta' NOT NULL,
+    CONSTRAINT PK_Recepcion_Paquetes PRIMARY KEY (id_paquete),
+    CONSTRAINT FK_Recepcion_Residentes FOREIGN KEY (id_residente) 
+        REFERENCES Residentes(id_residente),
+    CONSTRAINT FK_Recepcion_Empresas FOREIGN KEY (id_empresa) 
+        REFERENCES Empresas_Paquetaria(id_empresa),
+    -- Restricción CHECK para garantizar la integridad de los estados lógicos
+    CONSTRAINT CK_Estatus_Entrega CHECK (estatus_entrega IN ('En Caseta', 'Entregado', 'Rechazado'))
+);
+
+-- Tabla de evidencias digitales
+CREATE TABLE Evidencias_Digitales 
+(
+    id_evidencia INT IDENTITY(1,1) NOT NULL,
+    id_paquete INT NOT NULL,
+    ruta_fotografia VARCHAR(500) NOT NULL, -- Dirección URL o Path en el servidor de archivos remoto
+    tipo_evidencia VARCHAR(50) NOT NULL, -- Ej: 'Estado de recepcion', 'Firma de conformidad'
+    CONSTRAINT PK_Evidencias_Digitales PRIMARY KEY (id_evidencia),
+    CONSTRAINT FK_Evidencias_Paquetes FOREIGN KEY (id_paquete) 
+        REFERENCES Recepcion_Paquetes(id_paquete) ON DELETE CASCADE
+);
+
+-- Tabla de entrega de paquetes 
+CREATE TABLE Entregas_Residentes
+(
+    id_entrega INT IDENTITY(1,1) NOT NULL,
+    id_paquete INT NOT NULL,
+    fecha_entrega DATETIME DEFAULT GETDATE() NOT NULL, -- Registra el momento exacto del reclamo físico
+    CONSTRAINT PK_Entregas_Residentes PRIMARY KEY (id_entrega),
+    CONSTRAINT FK_Entregas_Paquetes FOREIGN KEY (id_paquete) 
+        REFERENCES Recepcion_Paquetes(id_paquete)
+);
+
+-- ===============================================
+-- 4 Poblar las tablas con los datos siguientes 
+-- ===============================================
+
+-- Carga del catálogo logístico
+INSERT INTO Empresas_Paquetaria (nombre_empresa) VALUES 
+('Amazon Prime Logística'),
+('Mercado Libre Envíos'),
+('DHL Express'),
+('FedEx');
+
+
+-- Carga inicial masiva de Residentes
+INSERT INTO Residentes (nombre, apellido, torre_bloque, numero_departamento, telefono) 
+VALUES 
+('Juan', 'Pérez Gómez', 'Torre A', '101', '5512345678'),
+('María', 'López Restrepo', 'Torre B', '402', '5587654321'),
+('Carlos', 'Mendoza Ortiz', 'Torre A', '204', '5543210987'),
+('Ana Karen', 'Silva Ruiz', 'Torre C', '102', '5576543210'),
+('David', 'Espinoza Luna', 'Torre B', '305', '5511223344'),
+('Diana Laura', 'Gomez Estrada', 'Torre C', '501', '5599887766'),
+('Alejandro', 'Meza Villalobos', 'Torre A', '403', '5566778899');
+
+
+-- Simulación transaccional de estados de paquetería
+INSERT INTO Recepcion_Paquetes (id_residente, id_empresa, descripcion_paquete, estatus_entrega) 
+VALUES
+(1, 1, 'Caja mediana de Amazon con cinta de seguridad', 'En Caseta'),
+(2, 2, 'Bolsa plástica gris de Mercado Libre', 'En Caseta'),
+(3, 3, 'Sobre amarillo de DHL con documentos express', 'En Caseta'),
+(4, 1, 'Paquete alargado de Amazon (artículos de hogar', 'Entregado'),
+(5, 4, 'Caja grande pesada de FedEx golpeada en esquina', 'Rechazado');
+
+-- Registro histórico para el paquete que ya fue entregado (id_paquete = 4)
+INSERT INTO Entregas_Residentes (id_paquete) 
+VALUES (4);
+
+-- Registro de auditoría visual remota
+INSERT INTO Evidencias_Digitales (id_paquete, ruta_fotografia, tipo_evidencia) 
+VALUES
+(1, '/server/evidencias/202606_pkg1_front.jpg', 'Estado de recepcion'),
+(2, '/server/evidencias/202606_pkg2_front.jpg', 'Estado de recepcion'),
+(4, '/server/evidencias/202606_pkg4_front.jpg', 'Estado de recepcion'),
+(4, '/server/evidencias/202606_pkg4_firma.jpg', 'Firma de conformidad');
+
+-- ===============================================
+-- 5 Crear una vista para para optimizacion
+-- ===============================================
+create VIEW Vw_Paquetes_pendientes as
+    select 
+        p.id_paquete AS [Folio_Interno],
+        CONCAT(r.nombre, ' ', r.apellido) AS [Residente_Destinatario],
+        CONCAT(r.torre_bloque, ' - Depto ', r.numero_departamento) AS [Ubicacion Residencial],
+        e.nombre_empresa AS [Compania Logistica],
+        p.fecha_recepcion AS [Fecha Ingreso],
+        p.descripcion_paquete AS [Descripcion Fisica]
+    from Recepcion_Paquetes p
+    INNER JOIN Residentes r on p.id_residente = r.id_residente
+    INNER JOIN Empresas_Paquetaria e on p.id_empresa = e.id_empresa
+    WHERE p.estatus_entrega = 'En Caseta'
+
+-- Ejecuta la vista con este comando para mostrar la informacion 
+select * from Vw_Paquetes_pendientes
+
+-- ===============================================
+-- 6 Logica de los SP (Procedimientos almacenados)
+-- ===============================================
+
+-- 1. Automatizar el ingreso remoto de paqueteria
+create PROCEDURE Sp_Registrar_Ingreso_Paquete
+    @id_residente int,
+    @id_empresa int,
+    @descripcion varchar (max)
+AS
+BEGIN
+    set Nocount ON
+
+    -- Inserciones directas aprovechando las restricciones por defecto
+    insert into Recepcion_Paquetes(id_residente, id_empresa, descripcion_paquete, estatus_entrega)
+    VALUES(@id_residente, @id_empresa, @descripcion, 'En Caseta')
+    
+    -- Regresa el ID generado en tiempo real
+    select SCOPE_IDENTITY() AS Nuevo_Id_Paquete
+END
+
+-- 2. Salida y Cierre de Custodia
+create Procedure Sp_Procesar_Entrega_Residente
+    @id_paquete int
+AS
+BEGIN
+    set nocount on
+
+    -- Validar el estado antes de modificar lso registros
+    if exists (select 1 from Recepcion_Paquetes WHERE id_paquete = @id_paquete AND estatus_entrega = 'En Caseta')
+    BEGIN
+        Begin tran
+
+        -- 1. Actualizar estado
+        update Recepcion_Paquetes
+        set estatus_entrega = 'Entregado'
+        WHERE id_paquete = @id_paquete
+
+        -- 2. Insercion automatica en el historial
+        insert into Entregas_Residentes(id_paquete)
+        VALUES(@id_paquete)
+        commit tran
+        print 'Transaccion Completa : Entrega realizada con exito de forma remota'
+    END
+
+    ELSE
+    BEGIN
+        Raiserror ('ERROR en validacion: Paquete no disponible en caseta', 16, 1)
+    END
+END
